@@ -1,0 +1,189 @@
+package com.uriroute.provider
+
+import android.content.ContentProvider
+import android.content.ContentValues
+import android.database.Cursor
+import android.database.MatrixCursor
+import android.net.Uri
+import com.uriroute.data.JsRepository
+import com.uriroute.engine.JsEngine
+import com.uriroute.model.JsScript
+import org.json.JSONObject
+
+/**
+ * ContentProvider that exposes JavaScript execution via URI:
+ *   content://uriroute/data?group=xxx&name=xxx&custom=value
+ *   content://uriroute/update?group=xxx&name=xxx
+ *
+ * /data — execute script (or return cached result)
+ * /update — clear the script's cache (no execution)
+ *
+ * Returns JSON result from the executed JS run() function.
+ *
+ * Supported paths: /data, /update
+ * Required params: group, name
+ * Custom params: any additional query parameters (for /data)
+ */
+class UriRouteProvider : ContentProvider() {
+
+    private lateinit var repository: JsRepository
+    private val engine = JsEngine()
+    private val scriptLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+    companion object {
+        private const val AUTHORITY = "uriroute"
+        private val SUPPORTED_PATHS = setOf("data", "update")
+    }
+
+    override fun onCreate(): Boolean {
+        repository = JsRepository(context!!)
+        return true
+    }
+
+    override fun query(
+        uri: Uri,
+        projection: Array<out String>?,
+        selection: String?,
+        selectionArgs: Array<out String>?,
+        sortOrder: String?
+    ): Cursor {
+        // Validate authority
+        if (uri.authority != AUTHORITY) {
+            return errorCursor("Invalid authority: ${uri.authority}")
+        }
+
+        // Validate path
+        val path = uri.path?.trim('/')?.lowercase() ?: ""
+        if (path.isBlank()) {
+            return errorCursor("Path is required: use /data or /update")
+        }
+        if (path !in SUPPORTED_PATHS) {
+            return errorCursor("Unsupported path: /$path (use /data or /update)")
+        }
+
+        val group = uri.getQueryParameter("group") ?: ""
+        val name = uri.getQueryParameter("name") ?: ""
+        val isData = path == "data"
+
+        if (group.isBlank()) {
+            return errorCursor("Parameter 'group' is required")
+        }
+        if (name.isBlank()) {
+            return errorCursor("Parameter 'name' is required")
+        }
+
+        if (!isData) {
+            // /update — clear cache only
+            repository.clearCache(group, name)
+            return resultCursor("""{"success":"缓存已清除"}""")
+        }
+
+        // /data — execute script (or return cached result)
+        // Build custom params from URI (exclude reserved params)
+        val reservedParams = setOf("group", "name")
+        val customParams = mutableMapOf<String, String>()
+        // Use getQueryParameters to handle repeated params (take last value)
+        for (param in uri.queryParameterNames) {
+            if (param !in reservedParams) {
+                uri.getQueryParameter(param)?.let { value ->
+                    if (value.isNotBlank()) {
+                        customParams[param] = value
+                    }
+                }
+            }
+        }
+
+        val script = JsScript(group, name)
+        val scriptContent = repository.getScriptContent(script)
+
+        if (scriptContent.isBlank()) {
+            return errorCursor("Script not found: group='$group', name='$name'")
+        }
+
+        // Check cache for data requests
+        if (isData) {
+            val cached = repository.getCachedData(group, name, customParams)
+            if (cached != null) {
+                return resultCursor(cached)
+            }
+        }
+
+        // Per-script lock: serialize concurrent requests for the same script
+        val lock = scriptLocks.getOrPut("$group:$name") { Any() }
+        synchronized(lock) {
+            // Double-check cache after acquiring lock
+            if (isData) {
+                val cached = repository.getCachedData(group, name, customParams)
+                if (cached != null) {
+                    return resultCursor(cached)
+                }
+            }
+
+            // Load env vars
+            val envVars = repository.getEnvVars(group, name)
+
+            // Load imports
+            val imports = repository.listImports().map { pkg ->
+                repository.getImportContent(pkg.name)
+            }.filter { it.isNotBlank() }
+
+            // Execute
+            val result = engine.execute(
+                JsEngine.ExecuteRequest(
+                    scriptContent = scriptContent,
+                    imports = imports,
+                    envVars = envVars,
+                    customParams = customParams,
+                    group = group,
+                    name = name
+                )
+            )
+
+            // Build result JSON safely
+            val resultJson = if (result.error != null) {
+                jsonEscape(mapOf("error" to result.error))
+            } else {
+                JSONObject(result.data).toString()
+            }
+
+            // Update cache on success
+            if (result.error == null) {
+                repository.saveCachedData(group, name, resultJson, customParams)
+            }
+
+            return resultCursor(resultJson)
+        }
+    }
+
+    override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+
+    override fun update(
+        uri: Uri,
+        values: ContentValues?,
+        selection: String?,
+        selectionArgs: Array<out String>?
+    ): Int = 0
+
+    override fun delete(
+        uri: Uri,
+        selection: String?,
+        selectionArgs: Array<out String>?
+    ): Int = 0
+
+    override fun getType(uri: Uri): String? = "text/plain"
+
+    private fun errorCursor(message: String): Cursor {
+        return resultCursor(jsonEscape(mapOf("error" to message)))
+    }
+
+    private fun resultCursor(json: String): Cursor {
+        val cursor = MatrixCursor(arrayOf("result"))
+        cursor.addRow(arrayOf(json))
+        return cursor
+    }
+
+    /** Safely build a JSON string with proper escaping. */
+    private fun jsonEscape(data: Map<String, String>): String {
+        return JSONObject(data).toString()
+    }
+}
