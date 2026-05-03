@@ -72,6 +72,7 @@ Cursor cursor = getContentResolver().query(uri, null, null, null, null);
 
 本项目由Jawiiki开发。项目全程通过ClaudeCode生成，本人仅提供了项目的设计方案。
 
+QQ交流群：1101900891
 
 [UriRoute-For-Xiaomi-17-Rear-Screen]("https://github.com/Jawiiki/UriRoute-For-Xiaomi-17-Rear-Screen")中的三个模块用作示范UriRoute的功能，显示的功能比较简单。希望有开发者能制作出更优秀的背屏模块。
 
