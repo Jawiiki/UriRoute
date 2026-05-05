@@ -3,6 +3,7 @@ package com.uriroute
 import android.app.Application
 import android.util.Log
 import com.uriroute.data.JsRepository
+import com.uriroute.engine.InstallManager
 import com.uriroute.engine.JsEngine
 import com.uriroute.engine.ShellManager
 import com.uriroute.engine.ShizukuShell
@@ -29,6 +30,9 @@ class UriRouteApplication : Application() {
         val repository = JsRepository(this)
         JsEngine.initEnvBase(File(filesDir, "js").absolutePath)
         ShellManager.setPermission(repository.getShellPermission())
+
+        // Initialize install manager for async script downloads
+        InstallManager.init(this)
 
         // Initial Shizuku state check
         updateShizukuState()

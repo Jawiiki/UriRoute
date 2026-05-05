@@ -22,6 +22,7 @@
 可通过`通用数据模板`编写自己的模块
 
 
+
 ## 核心理念
 
 UriRoute 在 Android 本地运行 JS 脚本（基于 Rhino 引擎），通过 **ContentProvider** 将执行结果以 URI 方式暴露给其他 App，相当于一个搭载了 JS 运行时的小型数据中间件。
@@ -45,19 +46,25 @@ function run() {
 }
 ```
 
-外部通过 URI 调用：
+对外开放的 URI 接口：
 
 ```java
-Uri uri = Uri.parse("content://uriroute/data?group=mygroup&name=myscript&city=beijing");
-Cursor cursor = getContentResolver().query(uri, null, null, null, null);
+1. content://uriroute/data?group=<group>&name=<name>&<key1>=<value1>
+调用group组下名称为name的JS脚本并传入key1=value1参数
+
+2. content://uriroute/update?group=<group>&name=<name>
+删除group组下名称为name的JS脚本的缓存内容
+
+3. content://uriroute/install?group=<group>&name=<name>&version=<version>&url=<js>&cache=<cache>&<key1>=<value1>
+安装脚本并设置脚本的group、name、version、cache、环境变量。当version大于本地已安装的脚本版本时才会安装,key1=value1会存入脚本的环境变量
 ```
 
 | 路径 | 行为 |
 |------|------|
 | `/data` | 有缓存读缓存，否则执行脚本并返回结果 |
 | `/update` | 清除该脚本的缓存 |
+| `/install` | 安装脚本 |
 
-自定义参数在 JS 中通过 `uriRoute.getValue("city")` 获取。
 
 ## 内置 API
 

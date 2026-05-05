@@ -1,5 +1,7 @@
 package com.uriroute.ui.screen
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,10 +12,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.uriroute.data.JsRepository
+import com.uriroute.engine.InstallManager
 import com.uriroute.engine.JsEngine
 import com.uriroute.model.ExecResult
+import com.uriroute.model.InstallStatus
 import com.uriroute.model.JsScript
 import com.uriroute.ui.component.ExecuteResultDialog
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +45,7 @@ fun OverviewScreen(
     var executedUri by remember { mutableStateOf("") }
     var isExecuting by remember { mutableStateOf(false) }
 
+    val installTasks by InstallManager.tasks.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
     // Refresh groups
@@ -55,82 +61,72 @@ fun OverviewScreen(
             modifier = Modifier.padding(16.dp)
         )
 
-        if (groups.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = androidx.compose.ui.Alignment.Center
-            ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // ── Installed scripts section ──
+            item {
                 Text(
-                    "暂无数据，请先在JS编辑器中添加脚本",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "已安装脚本",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 4.dp)
                 )
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(groups) { group ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                if (expandedGroup == group) {
-                                    expandedGroup = null
-                                } else {
-                                    expandedGroup = group
-                                    scripts = repository.listScripts(group)
-                                }
-                            },
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = group,
-                                style = MaterialTheme.typography.titleMedium
-                            )
 
+            if (groups.isEmpty()) {
+                item {
+                    Text(
+                        "暂无已安装的脚本",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+            } else {
+                items(groups) { group ->
+                    InstalledGroupCard(
+                        group = group,
+                        isExpanded = expandedGroup == group,
+                        scripts = if (expandedGroup == group) scripts else emptyList(),
+                        onClick = {
                             if (expandedGroup == group) {
-                                Spacer(Modifier.height(8.dp))
-                                scripts.forEach { script ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 4.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            text = script.name,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            FilledTonalButton(
-                                                onClick = {
-                                                    selectedScript = script
-                                                    executeParams = repository.getEnvVars(script.group, script.name)
-                                                    showExecuteDialog = true
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                            ) {
-                                                Text("执行", style = MaterialTheme.typography.labelSmall)
-                                            }
-                                            OutlinedButton(
-                                                onClick = { onNavigateToEditor(script) },
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                            ) {
-                                                Text("转到编辑器", style = MaterialTheme.typography.labelSmall)
-                                            }
-                                        }
-                                    }
-                                }
+                                expandedGroup = null
+                            } else {
+                                expandedGroup = group
+                                scripts = repository.listScripts(group)
                             }
-                        }
-                    }
+                        },
+                        onExecute = { script ->
+                            selectedScript = script
+                            executeParams = repository.getEnvVars(script.group, script.name)
+                            showExecuteDialog = true
+                        },
+                        onNavigateToEditor = onNavigateToEditor
+                    )
+                }
+            }
+
+            // ── Downloading scripts section ──
+            if (installTasks.isNotEmpty()) {
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "下载中的脚本",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
+
+                items(installTasks, key = { "${it.group}:${it.name}" }) { task ->
+                    DownloadTaskCard(
+                        task = task,
+                        onRetry = { InstallManager.retryInstall(task.group, task.name) },
+                        onDelete = { InstallManager.removeTask(task.group, task.name) }
+                    )
                 }
             }
         }
@@ -205,6 +201,137 @@ fun OverviewScreen(
                 executeParams = emptyMap()
             }
         )
+    }
+}
+
+@Composable
+private fun InstalledGroupCard(
+    group: String,
+    isExpanded: Boolean,
+    scripts: List<JsScript>,
+    onClick: () -> Unit,
+    onExecute: (JsScript) -> Unit,
+    onNavigateToEditor: (JsScript) -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = group,
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            if (isExpanded) {
+                Spacer(Modifier.height(8.dp))
+                scripts.forEach { script ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = script.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(
+                                onClick = { onExecute(script) },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                            ) {
+                                Text("执行", style = MaterialTheme.typography.labelSmall)
+                            }
+                            OutlinedButton(
+                                onClick = { onNavigateToEditor(script) },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                            ) {
+                                Text("转到编辑器", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadTaskCard(
+    task: com.uriroute.model.InstallTask,
+    onRetry: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                // Open download URL in browser
+                try {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(task.url)))
+                } catch (_: Exception) { }
+            },
+        colors = CardDefaults.cardColors(
+            containerColor = if (task.status == InstallStatus.TIMEOUT)
+                MaterialTheme.colorScheme.errorContainer
+            else
+                MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "${task.group} / ${task.name}",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                if (task.status == InstallStatus.INSTALLING) {
+                    Text(
+                        text = "下载中...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (task.error != null) {
+                    Text(
+                        text = task.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (task.status == InstallStatus.TIMEOUT || task.status == InstallStatus.FAILED) {
+                    FilledTonalButton(
+                        onClick = onRetry,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text("重试", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                TextButton(
+                    onClick = onDelete,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
     }
 }
 

@@ -30,3 +30,29 @@ enum class SourceType {
 enum class ShellPermission {
     ROOT, SHIZUKU
 }
+
+enum class InstallStatus {
+    INSTALLING, SUCCESS, FAILED, TIMEOUT
+}
+
+data class InstallTask(
+    val group: String,
+    val name: String,
+    val url: String,
+    val status: InstallStatus,
+    val error: String? = null,
+    val version: String = "",
+    val cache: String? = null,
+    val extraParams: Map<String, String> = emptyMap()
+) {
+    fun toRequest() = InstallRequest(group, name, version, url, cache, extraParams)
+}
+
+data class InstallRequest(
+    val group: String,
+    val name: String,
+    val version: String,
+    val url: String,
+    val cache: String?,
+    val extraParams: Map<String, String>
+)
