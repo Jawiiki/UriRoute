@@ -57,6 +57,9 @@ function run() {
 
 3. content://uriroute/install?group=<group>&name=<name>&version=<version>&url=<js>&cache=<cache>&<key1>=<value1>
 安装脚本并设置脚本的group、name、version、cache、环境变量。当version大于本地已安装的脚本版本时才会安装,key1=value1会存入脚本的环境变量
+
+3.1. content://uriroute/install?group=<group>&name=<name>&version=<version>&reareyeUri={"key1":"value1"}&cache=<cache>&<key1>=<value1>
+与3.中功能一致，获取脚本内容方式从url获取改为从REAREye软件中获取，reareyeUri参数中传入的参数会一同传递给"content://hk.uwu.reareye.archive.read",然后解析存储"contentBase64"的内容
 ```
 
 | 路径 | 行为 |

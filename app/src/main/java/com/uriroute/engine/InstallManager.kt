@@ -5,7 +5,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.util.Base64
 import androidx.core.app.NotificationCompat
 import com.uriroute.MainActivity
 import com.uriroute.data.JsRepository
@@ -73,6 +75,7 @@ object InstallManager {
                     t.cache?.let { put("cache", it) }
                     val extra = JSONObject(t.extraParams)
                     put("extraParams", extra)
+                    t.reareyeUri?.let { put("reareyeUri", it) }
                 })
             }
             file.writeText(arr.toString())
@@ -103,7 +106,8 @@ object InstallManager {
                     error = obj.optString("error", null),
                     version = obj.optString("version", ""),
                     cache = obj.optString("cache", null),
-                    extraParams = extra
+                    extraParams = extra,
+                    reareyeUri = obj.optString("reareyeUri", null)
                 ))
             }
             _tasks.value = list
@@ -201,7 +205,8 @@ object InstallManager {
             status = InstallStatus.INSTALLING,
             version = request.version,
             cache = request.cache,
-            extraParams = request.extraParams
+            extraParams = request.extraParams,
+            reareyeUri = request.reareyeUri
         )
         _tasks.value = _tasks.value.filter { it.group != request.group || it.name != request.name } + task
         saveTasks()
@@ -259,19 +264,54 @@ object InstallManager {
         val repo = JsRepository(ctx)
 
         try {
-            val url = URL(request.url)
-            val conn = url.openConnection() as HttpURLConnection
-            conn.connectTimeout = DOWNLOAD_TIMEOUT_MS
-            conn.readTimeout = DOWNLOAD_TIMEOUT_MS
-            conn.instanceFollowRedirects = true
-            conn.requestMethod = "GET"
+            val content: String
+            if (!request.reareyeUri.isNullOrBlank()) {
+                // ── RearEye mode ────────────────────────────
+                val reareyeJson = JSONObject(request.reareyeUri)
+                val queryUri = Uri.parse("content://hk.uwu.reareye.archive.read").buildUpon()
+                for (key in reareyeJson.keys()) {
+                    queryUri.appendQueryParameter(key, reareyeJson.optString(key, ""))
+                }
+                val finalUri = queryUri.build()
 
-            val responseCode = conn.responseCode
-            if (responseCode != HttpURLConnection.HTTP_OK) {
-                return@withContext InstallStatus.FAILED to "HTTP $responseCode"
+                val cursor = ctx.contentResolver.query(finalUri, null, null, null, null)
+                    ?: return@withContext InstallStatus.FAILED to "无法访问 reareye 服务"
+                content = cursor.use { c ->
+                    if (!c.moveToFirst()) {
+                        return@withContext InstallStatus.FAILED to "reareye 服务返回为空"
+                    }
+                    val resultJson = c.getString(c.getColumnIndexOrThrow("json"))
+                    val resultObj = JSONObject(resultJson)
+
+                    if (!resultObj.optBoolean("success", false)) {
+                        return@withContext InstallStatus.FAILED to
+                                resultObj.optString("error", "reareye 返回错误")
+                    }
+
+                    val base64Content = resultObj.optString("contentBase64", "")
+                    if (base64Content.isBlank()) {
+                        return@withContext InstallStatus.FAILED to "reareye 返回的 contentBase64 为空"
+                    }
+
+                    String(Base64.decode(base64Content, Base64.DEFAULT), Charsets.UTF_8)
+                }
+            } else {
+                // ── URL mode ────────────────────────────────
+                val url = URL(request.url)
+                val conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = DOWNLOAD_TIMEOUT_MS
+                conn.readTimeout = DOWNLOAD_TIMEOUT_MS
+                conn.instanceFollowRedirects = true
+                conn.requestMethod = "GET"
+
+                val responseCode = conn.responseCode
+                if (responseCode != HttpURLConnection.HTTP_OK) {
+                    return@withContext InstallStatus.FAILED to "HTTP $responseCode"
+                }
+
+                content = conn.inputStream.bufferedReader().use { it.readText() }
             }
 
-            val content = conn.inputStream.bufferedReader().use { it.readText() }
             if (content.isBlank()) {
                 return@withContext InstallStatus.FAILED to "下载内容为空"
             }
@@ -324,6 +364,7 @@ object InstallManager {
 
         nm.notify(notifyId, notification)
     }
+
 
     fun shutdown() {
         scope.cancel()

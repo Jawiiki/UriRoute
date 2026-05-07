@@ -274,10 +274,12 @@ private fun DownloadTaskCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
-                // Open download URL in browser
-                try {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(task.url)))
-                } catch (_: Exception) { }
+                // Open download URL in browser (only for URL mode)
+                if (task.url.isNotBlank()) {
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(task.url)))
+                    } catch (_: Exception) { }
+                }
             },
         colors = CardDefaults.cardColors(
             containerColor = if (task.status == InstallStatus.TIMEOUT)

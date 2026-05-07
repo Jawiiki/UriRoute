@@ -43,9 +43,10 @@ data class InstallTask(
     val error: String? = null,
     val version: String = "",
     val cache: String? = null,
-    val extraParams: Map<String, String> = emptyMap()
+    val extraParams: Map<String, String> = emptyMap(),
+    val reareyeUri: String? = null
 ) {
-    fun toRequest() = InstallRequest(group, name, version, url, cache, extraParams)
+    fun toRequest() = InstallRequest(group, name, version, url, cache, extraParams, reareyeUri)
 }
 
 data class InstallRequest(
@@ -54,5 +55,6 @@ data class InstallRequest(
     val version: String,
     val url: String,
     val cache: String?,
-    val extraParams: Map<String, String>
+    val extraParams: Map<String, String>,
+    val reareyeUri: String? = null
 )

@@ -177,8 +177,9 @@ class UriRouteProvider : ContentProvider() {
     /**
      * Handle /install path:
      *   content://uriroute/install?group=xxx&name=xxx&version=1.0&url=https://...&cache=60&key1=value1
+     *   content://uriroute/install?group=xxx&name=xxx&version=1.0&reareyeUri={"mode":"","id":"","entry":""}&cache=60
      *
-     * Required: group, name, version, url
+     * Required: group, name, version, and either url or reareyeUri
      * Optional: cache (seconds, must be integer)
      * Extra: any other params become environment variables
      */
@@ -186,16 +187,17 @@ class UriRouteProvider : ContentProvider() {
         val version = uri.getQueryParameter("version") ?: ""
         val url = uri.getQueryParameter("url") ?: ""
         val cache = uri.getQueryParameter("cache")
+        val reareyeUri = uri.getQueryParameter("reareyeUri")
 
         if (version.isBlank()) {
             return errorCursor("Parameter 'version' is required for install")
         }
-        if (url.isBlank()) {
-            return errorCursor("Parameter 'url' is required for install")
+        if (url.isBlank() && reareyeUri.isNullOrBlank()) {
+            return errorCursor("Parameter 'url' or 'reareyeUri' is required for install")
         }
 
         // Collect extra params (exclude reserved install params)
-        val reserved = setOf("group", "name", "version", "url", "cache")
+        val reserved = setOf("group", "name", "version", "url", "cache", "reareyeUri")
         val extraParams = mutableMapOf<String, String>()
         for (param in uri.queryParameterNames) {
             if (param !in reserved) {
@@ -213,7 +215,8 @@ class UriRouteProvider : ContentProvider() {
             version = version,
             url = url,
             cache = cache,
-            extraParams = extraParams
+            extraParams = extraParams,
+            reareyeUri = reareyeUri
         )
 
         val result = InstallManager.submitInstall(request)
